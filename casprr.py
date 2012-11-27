@@ -22,10 +22,30 @@ def __init__(self):
 		label = 'CASP RR contacts viewer',
 		command = lambda s=self : contactsDialog(s.root))
 
-def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation=4, contact_atom_mapping=contact_atoms_functional, distance_groups=distance_groups_default):
 
+def get_sequence(target, chain=""):
+	"""Determine protein sequence from PDB ATOM fields"""
 
-	sequence = get_sequence(target, chain) 
+	if chain == "": chain = " "
+
+	pdb = cmd.get_pdbstr(target).split("\n")
+
+	seq3 = [line[17:20] for line in pdb if line[13:16] == "CA " and line[21] == chain]
+	seq1 = [three_to_one[code] for code in seq3 if code] 
+
+	return "".join(seq1)
+
+def parse_casp_rr(contactFile):
+	"""Parse CASP RR file into a list of dicts
+	
+	Every list item will represent one contact prediction in the form of a dict with the following indices:
+
+		i	The index of the first residue
+		j	The index of the second residue
+		dmin	The minimal predicted distance between i and j
+		dmax	The maximal predicted distance between i and j
+		conf	The confidence of the above prediction
+	"""
 
 	contacts = []
 
@@ -38,58 +58,62 @@ def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation
 
 			i, j, dmin, dmax, conf = int(l[0]), int(l[1]), float(l[2]), float(l[3]), float(l[4])
 
-			x, y = contact_atom_mapping[ sequence[i-1] ], contact_atom_mapping[ sequence[j-1] ]
-
 			contacts.append({
 				 'i': i	
 				,'j': j
-				,'x': x
-				,'y': y
+				,'dmin': dmin
+				,'dmax': dmax
 				,'conf': conf
-				,'target': target
-				,'chain': chain
 			})
 
+	return contacts
+
+
+def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation=4, contact_atom_mapping=contact_atoms_functional, distance_groups=distance_groups_default):
+	"""Visualize contacts on a target"""
+
+	sequence = get_sequence(target, chain) 
+
+	contacts = parse_casp_rr(contactFile)
 	contacts = [ c for c in contacts if abs( c['i'] - c['j'] ) > min_separation]
-
 	contacts = sorted(contacts, key=itemgetter("conf"), reverse=True)
+	contacts = contacts[0:num_contacts]
 
-
+	# clean up previously created objects
 	for dgroup in ( v['name'] for v in distance_groups.values()):
 		if dgroup in cmd.get_names(): cmd.delete(dgroup)
 
-	for contact in contacts[0:num_contacts]:
+	for contact in contacts:
 
-		#x, y = contact_atoms[sequence[i-1]], contact_atoms[sequence[j-1]]
+		# decorate dict with additional information for easy string formatting
+		contact['target'] = target
+		contact['chain'] = chain
+		contact['x'] = contact_atom_mapping[ sequence[ contact['i'] - 1 ] ]
+		contact['y'] = contact_atom_mapping[ sequence[ contact['j'] - 1 ] ]
 	
-
+		# compute distance - this creates a dtemp object as a side effect which we will delete later
 		dst = cmd.distance("dtemp", "/{target}//{chain}/{i}/{x}".format(**contact), "/{target}//{chain}/{j}/{y}".format(**contact))
 
+		# find appropriate distance group
 		dgroup = [ v for k,v in distance_groups.items() if dst >= k ][-1]
 
+		# draw line in appropriate distance group
 		cmd.distance(dgroup['name'], "/{target}//{chain}/{i}/{x}".format(**contact), "/{target}//{chain}/{j}/{y}".format(**contact))
 
 
+	# color distance groups, hide labels
 	for k,v in distance_groups.items():
 		if v['name'] in cmd.get_names(): 
 			cmd.color(v['color'], v['name'])
 			cmd.hide('labels', v['name'])
 
+	# remove temp distance group
 	cmd.delete("dtemp")
 
 
-def get_sequence(target, chain=""):
-
-	if chain == "": chain = " "
-
-	pdb = cmd.get_pdbstr(target).split("\n")
-
-	seq3 = [line[17:20] for line in pdb if line[13:16] == "CA " and line[21] == chain]
-	seq1 = [three_to_one[code] for code in seq3 if code] 
-
-	return "".join(seq1)
-
 def contactsDialog(root):
+	"""Create GUI"""
+
 
 	PADDING=5
 
@@ -195,7 +219,7 @@ def contactsDialog(root):
 
 	browseTarget()
 
-if __name__ == "__main__":
-	root = Tk()
-	contactsDialog(root)
-	root.mainloop()
+#if __name__ == "__main__":
+#	root = Tk()
+#	contactsDialog(root)
+#	root.mainloop()
