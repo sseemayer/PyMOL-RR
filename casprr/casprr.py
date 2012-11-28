@@ -29,6 +29,10 @@ def show_contacts(contactFile, target, chain, num_contacts, min_separation, cont
 
 	geom = []
 
+
+	conf_max = max( c['conf'] for c in constraints )
+	conf_min = min( c['conf'] for c in constraints )
+
 	for constraint in constraints:
 
 		# decorate dict with additional information for easy string formatting
@@ -42,7 +46,11 @@ def show_contacts(contactFile, target, chain, num_contacts, min_separation, cont
 
 		color = gradient_interpolate(dst)
 
-		geom.extend( cylinder(posx, posy, c1=color, c2=color, r=CONSTRAINT_RADIUS) )
+		conf = float(constraint['conf'] - conf_min) / (conf_max - conf_min)
+
+		r = 0.05 + conf
+
+		geom.extend( cylinder(posx, posy, c1=color, c2=color, r=r) )
 
 	cmd.load_cgo(geom, "contacts", 1)
 
