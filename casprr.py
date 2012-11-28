@@ -1,16 +1,13 @@
 from Tkinter import *
 import tkFileDialog, tkMessageBox
 from pymol import cmd, cgo
-from operator import itemgetter
-import sys, urllib2, zlib, re, random, math, collections
+import sys, urllib2, zlib, re, random, math, collections, operator
 
 contact_atoms_C = { "A": "CB", "C": "CB", "D": "CB", "E": "CB", "F": "CB", "G": "CA", "H": "CB", "I": "CB", "K": "CB", "L": "CB", "M": "CB", "N": "CB", "P": "CB", "Q": "CB", "R": "CB", "S": "CB", "T": "CB", "V": "CB", "W": "CB", "Y": "CB" }
 contact_atoms_CA = { "A": "CA", "C": "CA", "D": "CA", "E": "CA", "F": "CA", "G": "CA", "H": "CA", "I": "CA", "K": "CA", "L": "CA", "M": "CA", "N": "CA", "P": "CA", "Q": "CA", "R": "CA", "S": "CA", "T": "CA", "V": "CA", "W": "CA", "Y": "CA" }
 contact_atoms_functional = { "A": "CB", "C": "SG", "D": "OD1", "E": "OE1", "F": "CZ", "G": "CA", "H": "CE1", "I": "CD1", "K": "NZ", "L": "CD1", "M": "CE", "N": "OD1", "P": "CG", "Q": "OE1", "R": "NH1", "S": "OG", "T": "OG1", "V": "CG1", "W": "CH2", "Y": "OH" }
 
 three_to_one = { "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLU": "E", "GLN": "Q", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V", "SEC": "U", "PYL": "O"}
-
-distance_groups_default = collections.OrderedDict([(0, {"name": "contact_close", "color": (0,1,0)}), (8, {"name": "contact_proximal", "color": (1,1,0)}), (13, {"name": "contact_distant", "color": (1,0,0)})])
 
 CONSTRAINT_RADIUS = 0.1
 
@@ -66,6 +63,27 @@ def parse_casp_rr(contactFile):
 
 	return contacts
 
+def gradient_interpolate(pos, breaks={8: (0,1,0), 12:(1,1,0), 23:(1,0,0)}) :
+
+	pos = float(pos)
+
+	brks = list(breaks.items())
+	brks = sorted(brks, key=lambda b: b[0])
+	
+	brks.insert(0, (float('-inf'), brks[0][1]))
+	brks.append((float('inf'), brks[-1][1]))
+
+	i = next( i for i, b in enumerate(brks) if pos < b[0])
+
+	bfr = brks[i-1]
+	bto = brks[i]
+
+	if all( f == t for f,t in zip(bfr[1], bto[1])): return bfr[1]
+
+	k = float(pos - bfr[0]) / (bto[0] - bfr[0])
+
+	return tuple( (1-k) * f + k*t for f,t in zip(bfr[1], bto[1]) )
+	
 
 def cylinder(x1, x2, c1=(0,1,0), c2=(0,1,0), r=0.5):
 	"""Create a CGO cylinder
@@ -88,14 +106,14 @@ def cylinder(x1, x2, c1=(0,1,0), c2=(0,1,0), r=0.5):
 def atom_pos(selection):
 	return cmd.get_model(selection, 1).get_coord_list()
 
-def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation=4, contact_atom_mapping=contact_atoms_functional, distance_groups=distance_groups_default):
+def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation=4, contact_atom_mapping=contact_atoms_functional):
 	"""Visualize contacts on a target"""
 
 	sequence = get_sequence(target, chain) 
 
 	contacts = parse_casp_rr(contactFile)
 	contacts = [ c for c in contacts if abs( c['i'] - c['j'] ) > min_separation]
-	contacts = sorted(contacts, key=itemgetter("conf"), reverse=True)
+	contacts = sorted(contacts, key=operator.itemgetter("conf"), reverse=True)
 	contacts = contacts[0:num_contacts]
 
 	# clean up previously created objects
@@ -117,17 +135,15 @@ def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation
 
 		dst = math.sqrt((posx[0] - posy[0])**2 + (posx[1] - posy[1])**2 + (posx[2] - posy[2])**2)
 
-		# find appropriate distance group
-		dgroup = [ v for k,v in distance_groups.items() if dst >= k ][-1]
+		color = gradient_interpolate(dst)
 
-		geom.extend( cylinder(posx, posy, c1=dgroup['color'], c2=dgroup['color'], r=CONSTRAINT_RADIUS) )
+		geom.extend( cylinder(posx, posy, c1=color, c2=color, r=CONSTRAINT_RADIUS) )
 
 	cmd.load_cgo(geom, "contact", 1)
 
 
 def contactsDialog(root):
 	"""Create GUI"""
-
 
 	PADDING=5
 
