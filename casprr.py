@@ -1,11 +1,8 @@
 from Tkinter import *
-import tkFileDialog
-import tkMessageBox
-from pymol import cmd
+import tkFileDialog, tkMessageBox
+from pymol import cmd, cgo
 from operator import itemgetter
-import collections
-import sys, urllib2, zlib, re
-import random
+import sys, urllib2, zlib, re, random, math, collections
 
 contact_atoms_C = { "A": "CB", "C": "CB", "D": "CB", "E": "CB", "F": "CB", "G": "CA", "H": "CB", "I": "CB", "K": "CB", "L": "CB", "M": "CB", "N": "CB", "P": "CB", "Q": "CB", "R": "CB", "S": "CB", "T": "CB", "V": "CB", "W": "CB", "Y": "CB" }
 contact_atoms_CA = { "A": "CA", "C": "CA", "D": "CA", "E": "CA", "F": "CA", "G": "CA", "H": "CA", "I": "CA", "K": "CA", "L": "CA", "M": "CA", "N": "CA", "P": "CA", "Q": "CA", "R": "CA", "S": "CA", "T": "CA", "V": "CA", "W": "CA", "Y": "CA" }
@@ -13,8 +10,9 @@ contact_atoms_functional = { "A": "CB", "C": "SG", "D": "OD1", "E": "OE1", "F": 
 
 three_to_one = { "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLU": "E", "GLN": "Q", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V", "SEC": "U", "PYL": "O"}
 
-distance_groups_default = collections.OrderedDict([(0, {"name": "contact_close", "color": "green"}), (8, {"name": "contact_proximal", "color": "yellow"}), (13, {"name": "contact_distant", "color": "red"})])
+distance_groups_default = collections.OrderedDict([(0, {"name": "contact_close", "color": (0,1,0)}), (8, {"name": "contact_proximal", "color": (1,1,0)}), (13, {"name": "contact_distant", "color": (1,0,0)})])
 
+CONSTRAINT_RADIUS = 0.1
 
 def __init__(self):
 	self.menuBar.addmenuitem('Plugin', 'command',
@@ -69,6 +67,27 @@ def parse_casp_rr(contactFile):
 	return contacts
 
 
+def cylinder(x1, x2, c1=(0,1,0), c2=(0,1,0), r=0.5):
+	"""Create a CGO cylinder
+	
+	:param x1: a (x,y,z) tuple giving the first coordinate in angstroms
+	:param x2: a (x,y,z) tuple giving the second coordinate in angstroms
+	:param c1: a (r,g,b) tuple giving the color of the first coordinate (range [0:1])
+	:param c2: a (r,g,b) tuple giving the color of the second coordinate (range [0:1])
+	:param r: the radius of the cylinder in angstroms
+
+	"""
+	if isinstance(x1, str):
+		x1 = atom_pos(x1)
+	
+	if isinstance(x2, str):
+		x2 = atom_pos(x2)
+
+	return [cgo.CYLINDER, x1[0], x1[1], x1[2], x2[0], x2[1], x2[2], r, c1[0], c1[1], c1[2], c2[0], c2[1], c2[2]]
+
+def atom_pos(selection):
+	return cmd.get_model(selection, 1).get_coord_list()
+
 def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation=4, contact_atom_mapping=contact_atoms_functional, distance_groups=distance_groups_default):
 	"""Visualize contacts on a target"""
 
@@ -80,8 +99,9 @@ def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation
 	contacts = contacts[0:num_contacts]
 
 	# clean up previously created objects
-	for dgroup in ( v['name'] for v in distance_groups.values()):
-		if dgroup in cmd.get_names(): cmd.delete(dgroup)
+	if "contact" in cmd.get_names(): cmd.delete("contact")
+
+	geom = []
 
 	for contact in contacts:
 
@@ -91,24 +111,18 @@ def show_contacts(contactFile, target, chain="", num_contacts=50, min_separation
 		contact['x'] = contact_atom_mapping[ sequence[ contact['i'] - 1 ] ]
 		contact['y'] = contact_atom_mapping[ sequence[ contact['j'] - 1 ] ]
 	
-		# compute distance - this creates a dtemp object as a side effect which we will delete later
-		dst = cmd.distance("dtemp", "/{target}//{chain}/{i}/{x}".format(**contact), "/{target}//{chain}/{j}/{y}".format(**contact))
+
+		posx = atom_pos("/{target}//{chain}/{i}/{x}".format(**contact))[0]
+		posy = atom_pos("/{target}//{chain}/{j}/{y}".format(**contact))[0]
+
+		dst = math.sqrt((posx[0] - posy[0])**2 + (posx[1] - posy[1])**2 + (posx[2] - posy[2])**2)
 
 		# find appropriate distance group
 		dgroup = [ v for k,v in distance_groups.items() if dst >= k ][-1]
 
-		# draw line in appropriate distance group
-		cmd.distance(dgroup['name'], "/{target}//{chain}/{i}/{x}".format(**contact), "/{target}//{chain}/{j}/{y}".format(**contact))
+		geom.extend( cylinder(posx, posy, c1=dgroup['color'], c2=dgroup['color'], r=CONSTRAINT_RADIUS) )
 
-
-	# color distance groups, hide labels
-	for k,v in distance_groups.items():
-		if v['name'] in cmd.get_names(): 
-			cmd.color(v['color'], v['name'])
-			cmd.hide('labels', v['name'])
-
-	# remove temp distance group
-	cmd.delete("dtemp")
+	cmd.load_cgo(geom, "contact", 1)
 
 
 def contactsDialog(root):
@@ -152,6 +166,7 @@ def contactsDialog(root):
 	for n in molecules:
 		for ch in cmd.get_chains(n):
 			objects.append((n, ch))
+			print(n,ch)
 			lstObject.insert(END, "{0}/{1}".format(n,ch))
 
 	if objects: lstObject.selection_set(0)
