@@ -2,8 +2,13 @@
 
 PyMOL-RR is a PyMOL plugin that can be used for visualizing residue-residue contact predictions in the format required by the CASP experiment in PyMOL. You can filter predictions using a GUI and map them onto a provided PDB structure. 
 
+## Usage
+The plugin takes a contact prediction in CASP RR format and maps the highest-scoring predictions onto a protein structure.
+
 ## Installation
 Checkout the project somewhere on your hard disk. In PyMOL, go to Plugin -> Plugin Manager -> Settings and ensure that the root of the PyMOL-RR git repository (NOT THE `casprr` SUBDIRECTORY!) is in the plugin search path.
+
+I recommend also installing the [ZeroResidues](http://www.pymolwiki.org/index.php/Zero_residues) script from the PyMOLWiki to renumber residues so they are starting from index 0.
 
 ## License
 PyMOL-RR is licensed under the MIT License.
